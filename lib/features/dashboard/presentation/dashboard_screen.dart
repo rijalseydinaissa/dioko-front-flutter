@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:payments_app/features/dashboard/data/dashboard_repository.dart';
+import 'package:go_router/go_router.dart';
+import 'package:payments_app/core/providers.dart';
+import 'package:payments_app/features/dashboard/data/dashboard_models.dart';
 
-final _dashboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  return ref.read(dashboardRepositoryProvider).index();
+
+final statsProvider = FutureProvider.autoDispose<Stats>((ref) async {
+  return ref.read(dashboardRepositoryProvider).fetchStats();
 });
 
-final _monthlyProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
-  return ref.read(dashboardRepositoryProvider).monthlyStats();
+final recentPaymentsProvider = FutureProvider.autoDispose<List<Payment>>((ref) async {
+  return ref.read(dashboardRepositoryProvider).fetchRecentPayments();
 });
 
-final _typeStatsProvider = FutureProvider.autoDispose<List<dynamic>>((ref) async {
-  return ref.read(dashboardRepositoryProvider).paymentTypeStats();
+final paymentTypesProvider = FutureProvider.autoDispose<List<PaymentType>>((ref) async {
+  return ref.read(dashboardRepositoryProvider).fetchPaymentTypes();
 });
 
 class DashboardScreen extends ConsumerWidget {
@@ -20,78 +22,63 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final dash = ref.watch(_dashboardProvider);
-    final monthly = ref.watch(_monthlyProvider);
-    final types = ref.watch(_typeStatsProvider);
+    final stats = ref.watch(statsProvider);
+    final recentPayments = ref.watch(recentPaymentsProvider);
+    final types = ref.watch(paymentTypesProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Tableau de bord'), actions: [
-        IconButton(
-          icon: const Icon(Icons.logout),
-          onPressed: () async {
-            // Simple logout via provider lookup
-            // ignore: use_build_context_synchronously
-            Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
-          },
-        )
-      ]),
+      appBar: AppBar(
+        title: const Text('Tableau de bord'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () {
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
+            },
+          )
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.of(context).pushNamed('/payments/new'),
+        onPressed: () => context.push('/payments/new'), // <-- avec GoRouter
         icon: const Icon(Icons.add),
         label: const Text('Nouveau paiement'),
       ),
+
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            dash.when(
-              data: (data) => _BalanceCard(balance: (data['balance'] ?? 0).toString()),
+            stats.when(
+              data: (s) => _BalanceCard(balance: s.balance),
               loading: () => const LinearProgressIndicator(),
               error: (e, _) => Text('Erreur: $e'),
             ),
             const SizedBox(height: 16),
-            Text('Évolution mensuelle', style: Theme.of(context).textTheme.titleLarge),
+            Text('Paiements récents', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: SizedBox(height: 240, child: monthly.when(
-                  data: (list) => LineChart(LineChartData(
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: [
-                          for (final (i, e) in list.indexed)
-                            FlSpot(i.toDouble(), (e['amount'] as num).toDouble()),
-                        ],
-                      ),
-                    ],
-                  )),
-                  loading: () => const Center(child: CircularProgressIndicator()),
-                  error: (e, _) => Text('Erreur: $e'),
-                )),
+            recentPayments.when(
+              data: (list) => Column(
+                children: list.map((p) => ListTile(
+                  title: Text(p.description),
+                  subtitle: Text('${p.amount} - ${p.statusLabel}'),
+                  trailing: Text(p.paymentType.name),
+                )).toList(),
               ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Text('Erreur: $e'),
             ),
             const SizedBox(height: 16),
-            Text('Par type de paiement', style: Theme.of(context).textTheme.titleLarge),
+            Text('Types de paiement', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: SizedBox(
-                  height: 240,
-                  child: types.when(
-                    data: (list) => PieChart(PieChartData(
-                      sections: [
-                        for (final e in list)
-                          PieChartSectionData(value: (e['amount'] as num).toDouble(), title: e['type'].toString()),
-                      ],
-                    )),
-                    loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (e, _) => Text('Erreur: $e'),
-                  ),
-                ),
+            types.when(
+              data: (list) => Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: list.map((t) => Chip(label: Text(t.name))).toList(),
               ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Text('Erreur: $e'),
             ),
           ],
         ),
@@ -117,7 +104,11 @@ class _BalanceCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('Solde disponible'),
-                Text(balance, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                Text(balance,
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.bold)),
               ],
             )
           ],

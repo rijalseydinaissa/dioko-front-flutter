@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,7 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
   final _type = TextEditingController();
 
   String? _pickedPath;
+  Uint8List? _pickedBytes; // pour Web
   String? _pickedName;
   bool _loading = false;
   String? _error;
@@ -39,7 +41,8 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+                      if (_error != null)
+                        Text(_error!, style: const TextStyle(color: Colors.red)),
                       TextFormField(
                         controller: _description,
                         decoration: const InputDecoration(labelText: 'Description'),
@@ -49,30 +52,37 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
                       TextFormField(
                         controller: _amount,
                         decoration: const InputDecoration(labelText: 'Montant'),
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        validator: (v) => (v == null || double.tryParse(v) == null) ? 'Montant invalide' : null,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        validator: (v) =>
+                            (v == null || double.tryParse(v) == null) ? 'Montant invalide' : null,
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: _type,
-                        decoration: const InputDecoration(labelText: 'Type (internet, eau, etc.)'),
+                        decoration:
+                            const InputDecoration(labelText: 'Type (internet, eau, etc.)'),
                       ),
                       const SizedBox(height: 16),
-                      Row(children: [
-                        FilledButton.icon(
-                          onPressed: _pickFile,
-                          icon: const Icon(Icons.attach_file),
-                          label: const Text('Joindre justificatif (PDF/Image)'),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(child: Text(_pickedName ?? 'Aucun fichier sélectionné')),
-                      ]),
+                      Row(
+                        children: [
+                          FilledButton.icon(
+                            onPressed: _pickFile,
+                            icon: const Icon(Icons.attach_file),
+                            label: const Text('Joindre justificatif (PDF/Image)'),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(_pickedName ?? 'Aucun fichier sélectionné')),
+                        ],
+                      ),
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
                           onPressed: _loading ? null : _submit,
-                          child: _loading ? const CircularProgressIndicator() : const Text('Valider'),
+                          child: _loading
+                              ? const CircularProgressIndicator()
+                              : const Text('Valider'),
                         ),
                       )
                     ],
@@ -87,19 +97,29 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
   }
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(withData: false, type: FileType.any);
+    final result = await FilePicker.platform.pickFiles(
+      withData: true, // nécessaire pour Web
+      type: FileType.any,
+    );
+
     if (result != null && result.files.isNotEmpty) {
       final f = result.files.single;
       setState(() {
-        _pickedPath = f.path;
         _pickedName = f.name;
+        _pickedPath = f.path; // null sur Web
+        _pickedBytes = f.bytes; // pour Web
       });
     }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() { _loading = true; _error = null; });
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
     try {
       final repo = ref.read(paymentRepositoryProvider);
       final payment = await repo.create(
@@ -108,12 +128,30 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
         type: _type.text.trim().isEmpty ? null : _type.text.trim(),
         filePath: _pickedPath,
         fileName: _pickedName,
+        fileBytes: _pickedBytes, // <-- important pour Web
       );
+
       if (mounted) context.go('/payments/${payment.id}');
+    } on AppException catch (e) {
+      setState(() {
+        _error = e.message;
+      });
     } catch (e) {
-      setState(() { _error = e.toString(); });
+      setState(() {
+        _error = 'Une erreur inconnue est survenue';
+      });
     } finally {
-      if (mounted) setState(() { _loading = false; });
+      if (mounted) setState(() {
+        _loading = false;
+      });
     }
   }
+}
+
+class AppException implements Exception {
+  final String message;
+  final int? statusCode;
+  AppException(this.message, {this.statusCode});
+  @override
+  String toString() => 'AppException($statusCode): $message';
 }
