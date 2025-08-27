@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:payments_app/core/exceptions.dart';
-import 'package:payments_app/features/payments/data/payment_repository.dart';
 import 'package:payments_app/core/providers.dart';
 import 'package:payments_app/features/dashboard/data/dashboard_models.dart';
+import 'package:payments_app/features/payments/data/payments_providers.dart'; // ✅ Import nécessaire
+import 'package:flutter/foundation.dart'; // pour kIsWeb
 
-// Assurez-vous que ce provider existe dans dashboard_models.dart ou providers.dart
 final paymentTypesProvider = FutureProvider.autoDispose<List<PaymentType>>((ref) async {
   return ref.read(dashboardRepositoryProvider).fetchPaymentTypes();
 });
@@ -24,10 +24,9 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _description = TextEditingController();
   final _amount = TextEditingController();
-  String? _selectedType;
-
-  String? _pickedPath;
-  Uint8List? _pickedBytes; // pour Web
+  int? _selectedTypeId;
+  String? _pickedPath; // utilisé pour Mobile
+  Uint8List? _pickedBytes; // utilisé pour Web
   String? _pickedName;
   bool _loading = false;
   String? _error;
@@ -63,21 +62,22 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
                         controller: _amount,
                         decoration: const InputDecoration(labelText: 'Montant'),
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        validator: (v) =>
-                            (v == null || double.tryParse(v) == null) ? 'Montant invalide' : null,
+                        validator: (v) => (v == null || double.tryParse(v) == null)
+                            ? 'Montant invalide'
+                            : null,
                       ),
                       const SizedBox(height: 12),
                       paymentTypesAsync.when(
-                        data: (types) => DropdownButtonFormField<String>(
-                          value: _selectedType,
+                        data: (types) => DropdownButtonFormField<int>(
+                          value: _selectedTypeId,
                           decoration: const InputDecoration(labelText: 'Type'),
                           items: types
                               .map((t) => DropdownMenuItem(
-                                    value: t.name,
+                                    value: t.id,
                                     child: Text(t.name),
                                   ))
                               .toList(),
-                          onChanged: (v) => setState(() => _selectedType = v),
+                          onChanged: (v) => setState(() => _selectedTypeId = v),
                         ),
                         loading: () => const LinearProgressIndicator(),
                         error: (e, _) => Text('Erreur: $e'),
@@ -88,7 +88,7 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
                           FilledButton.icon(
                             onPressed: _pickFile,
                             icon: const Icon(Icons.attach_file),
-                            label: const Text('Joindre justificatif (PDF/Image)'),
+                            label: const Text('Joindre justificatif'),
                           ),
                           const SizedBox(width: 12),
                           Expanded(child: Text(_pickedName ?? 'Aucun fichier sélectionné')),
@@ -115,22 +115,30 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
     );
   }
 
+  /// ✅ Sélection de fichier compatible Web & Mobile
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
-      withData: true, // pour Web
-      type: FileType.any,
+      withData: true, // Obligatoire pour Web
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'png', 'jpg', 'jpeg'],
     );
 
     if (result != null && result.files.isNotEmpty) {
       final f = result.files.single;
       setState(() {
         _pickedName = f.name;
-        _pickedPath = f.path; // null sur Web
-        _pickedBytes = f.bytes; // pour Web
+        _pickedBytes = f.bytes; // ✅ Utilisé pour Web
+        // ✅ Ne JAMAIS accéder à f.path sur Web (il n'existe pas)
+        if (!kIsWeb) {
+          _pickedPath = f.path; // ✅ Mobile/Desktop uniquement
+        } else {
+          _pickedPath = null; // ✅ Forcer null sur Web
+        }
       });
     }
   }
 
+  /// ✅ Soumission avec invalidation des providers et redirection vers la liste
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -144,27 +152,41 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
       final payment = await repo.create(
         description: _description.text.trim(),
         amount: double.parse(_amount.text.trim()),
-        type: _selectedType,
-        filePath: _pickedPath,
+        paymentTypeId: _selectedTypeId,
+        filePath: _pickedPath, // Mobile
         fileName: _pickedName,
         fileBytes: _pickedBytes, // Web
       );
 
-      if (mounted) context.go('/payments/${payment.id}');
+      if (mounted) {
+        // ✅ ÉTAPE 1: Invalider tous les providers liés aux paiements
+        ref.invalidate(allPaymentsProvider);        // Provider principal
+        ref.invalidate(pendingPaymentsProvider);    // Paiements en attente
+        ref.invalidate(completedPaymentsProvider);  // Paiements terminés
+        ref.invalidate(paymentStatsProvider);       // Statistiques
+
+        // ✅ ÉTAPE 2: Afficher le message de succès
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Paiement créé avec succès !'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        // ✅ ÉTAPE 3: Rediriger vers la liste des paiements au lieu du dashboard
+        context.go('/payments'); // ou la route de votre PaymentsListScreen
+        //context.go('/dashboard'); // ou la route de votre PaymentsListScreen
+
+        // Alternative si vous voulez aller au dashboard :
+        // context.go('/dashboard');
+      }
     } on AppException catch (e) {
       setState(() => _error = e.message);
-    } catch (e) {
+    } catch (_) {
       setState(() => _error = 'Une erreur inconnue est survenue');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
-}
-
-class AppException implements Exception {
-  final String message;
-  final int? statusCode;
-  AppException(this.message, {this.statusCode});
-  @override
-  String toString() => 'AppException($statusCode): $message';
 }

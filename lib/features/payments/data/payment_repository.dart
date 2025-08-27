@@ -1,15 +1,9 @@
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:payments_app/core/exceptions.dart';
 import 'package:payments_app/core/http_client.dart';
-import 'package:payments_app/core/providers.dart';
 import 'payment_models.dart';
 
-final paymentRepositoryProvider = Provider<PaymentRepository>((ref) {
-  final client = ref.read(httpClientProvider);
-  return PaymentRepository(client);
-});
 
 class PaymentRepository {
   final HttpClient _http;
@@ -55,7 +49,7 @@ class PaymentRepository {
   Future<Payment> create({
     required String description,
     required double amount,
-    String? type,
+    int? paymentTypeId,
     String? filePath,
     String? fileName,
     Uint8List? fileBytes,
@@ -64,23 +58,23 @@ class PaymentRepository {
       final form = FormData();
       form.fields.add(MapEntry('description', description));
       form.fields.add(MapEntry('amount', amount.toString()));
-      if (type != null) form.fields.add(MapEntry('type', type));
+      if (paymentTypeId != null) form.fields.add(MapEntry('payment_type_id', paymentTypeId.toString()));
 
-      if (filePath != null) {
+      // ✅ Priorité à fileBytes (Web), fallback sur filePath (Mobile)
+      if (fileBytes != null && fileName != null) {
         form.files.add(MapEntry(
-          'proof',
-          await MultipartFile.fromFile(filePath, filename: fileName ?? filePath.split('/').last),
+          'attachment',
+          MultipartFile.fromBytes(fileBytes, filename: fileName),
         ));
-      } else if (fileBytes != null) {
+      } else if (filePath != null) {
         form.files.add(MapEntry(
-          'proof',
-          MultipartFile.fromBytes(fileBytes, filename: fileName ?? 'upload_file'),
+          'attachment',
+          await MultipartFile.fromFile(filePath, filename: fileName ?? filePath.split('/').last),
         ));
       }
 
       final res = await _http.post('/payments/', data: form);
 
-      // CORRECTION: Gérer la réponse selon la structure de l'API
       final responseData = res.data as Map<String, dynamic>;
       if (responseData.containsKey('data')) {
         return Payment.fromJson(Map<String, dynamic>.from(responseData['data']));
@@ -101,6 +95,7 @@ class PaymentRepository {
       );
     }
   }
+
 
   Future<Payment> cancel(String id) async {
     try {

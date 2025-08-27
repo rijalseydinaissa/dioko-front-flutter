@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:payments_app/features/payments/data/payment_models.dart';
 import 'package:payments_app/features/payments/data/payment_repository.dart';
+import 'package:payments_app/core/providers.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
