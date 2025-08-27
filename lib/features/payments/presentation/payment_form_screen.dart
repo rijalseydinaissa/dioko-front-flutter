@@ -3,7 +3,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:payments_app/core/exceptions.dart';
 import 'package:payments_app/features/payments/data/payment_repository.dart';
+import 'package:payments_app/core/providers.dart';
+import 'package:payments_app/features/dashboard/data/dashboard_models.dart';
+
+// Assurez-vous que ce provider existe dans dashboard_models.dart ou providers.dart
+final paymentTypesProvider = FutureProvider.autoDispose<List<PaymentType>>((ref) async {
+  return ref.read(dashboardRepositoryProvider).fetchPaymentTypes();
+});
 
 class PaymentFormScreen extends ConsumerStatefulWidget {
   const PaymentFormScreen({super.key});
@@ -16,7 +24,7 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _description = TextEditingController();
   final _amount = TextEditingController();
-  final _type = TextEditingController();
+  String? _selectedType;
 
   String? _pickedPath;
   Uint8List? _pickedBytes; // pour Web
@@ -26,6 +34,8 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final paymentTypesAsync = ref.watch(paymentTypesProvider);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Nouveau paiement')),
       body: SingleChildScrollView(
@@ -52,16 +62,25 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
                       TextFormField(
                         controller: _amount,
                         decoration: const InputDecoration(labelText: 'Montant'),
-                        keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         validator: (v) =>
                             (v == null || double.tryParse(v) == null) ? 'Montant invalide' : null,
                       ),
                       const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _type,
-                        decoration:
-                            const InputDecoration(labelText: 'Type (internet, eau, etc.)'),
+                      paymentTypesAsync.when(
+                        data: (types) => DropdownButtonFormField<String>(
+                          value: _selectedType,
+                          decoration: const InputDecoration(labelText: 'Type'),
+                          items: types
+                              .map((t) => DropdownMenuItem(
+                                    value: t.name,
+                                    child: Text(t.name),
+                                  ))
+                              .toList(),
+                          onChanged: (v) => setState(() => _selectedType = v),
+                        ),
+                        loading: () => const LinearProgressIndicator(),
+                        error: (e, _) => Text('Erreur: $e'),
                       ),
                       const SizedBox(height: 16),
                       Row(
@@ -98,7 +117,7 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
 
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
-      withData: true, // nécessaire pour Web
+      withData: true, // pour Web
       type: FileType.any,
     );
 
@@ -125,25 +144,19 @@ class _PaymentFormScreenState extends ConsumerState<PaymentFormScreen> {
       final payment = await repo.create(
         description: _description.text.trim(),
         amount: double.parse(_amount.text.trim()),
-        type: _type.text.trim().isEmpty ? null : _type.text.trim(),
+        type: _selectedType,
         filePath: _pickedPath,
         fileName: _pickedName,
-        fileBytes: _pickedBytes, // <-- important pour Web
+        fileBytes: _pickedBytes, // Web
       );
 
       if (mounted) context.go('/payments/${payment.id}');
     } on AppException catch (e) {
-      setState(() {
-        _error = e.message;
-      });
+      setState(() => _error = e.message);
     } catch (e) {
-      setState(() {
-        _error = 'Une erreur inconnue est survenue';
-      });
+      setState(() => _error = 'Une erreur inconnue est survenue');
     } finally {
-      if (mounted) setState(() {
-        _loading = false;
-      });
+      if (mounted) setState(() => _loading = false);
     }
   }
 }

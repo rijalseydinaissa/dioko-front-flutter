@@ -92,6 +92,23 @@ class HttpClient {
     }
   }
 
+Future<Response<T>> put<T>(String path, {Object? data}) async {
+  try {
+    return await _dio.put(path, data: data);
+  } catch (e) {
+    throw _wrap(e);
+  }
+}
+
+Future<Response<T>> delete<T>(String path) async {
+  try {
+    return await _dio.delete(path);
+  } catch (e) {
+    throw _wrap(e);
+  }
+}
+
+
   AppException _wrap(Object e) {
     if (e is DioException) {
       final msg = e.response?.data is Map<String, dynamic>

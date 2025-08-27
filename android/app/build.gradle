@@ -6,6 +6,7 @@ plugins {
 }
 
 android {
+    namespace "com.paymentapp.payment_app"  // ← AJOUTEZ CETTE LIGNE
     compileSdkVersion 34
 
     defaultConfig {

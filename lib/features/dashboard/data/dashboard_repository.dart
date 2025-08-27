@@ -22,4 +22,11 @@ class DashboardRepository {
     final typesJson = res.data['data']['payment_types'] as List<dynamic>;
     return typesJson.map((e) => PaymentType.fromJson(e)).toList();
   }
+   Future<void> approvePayment(int paymentId) async {
+      await _http.patch('/payments/$paymentId/approve');
+    }
+
+    Future<void> cancelPayment(int paymentId) async {
+      await _http.patch('/payments/$paymentId/cancel');
+    }
 }

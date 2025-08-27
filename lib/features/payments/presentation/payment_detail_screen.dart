@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:payments_app/features/payments/data/payment_models.dart';
 import 'package:payments_app/features/payments/data/payment_repository.dart';
 import 'package:intl/intl.dart';
-import 'package:payments_app/core/url_utils.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final paymentDetailProvider = FutureProvider.family<Payment, String>((ref, id) async {
   return ref.read(paymentRepositoryProvider).show(id);
@@ -35,24 +35,24 @@ class PaymentDetailScreen extends ConsumerWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              Text('Montant: ${p.amount.toStringAsFixed(2)}'),
-              Text('Type: ${p.type ?? '-'}'),
-              Text('Date: ${DateFormat.yMMMd().format(p.createdAt)}'),
+              Text('Montant: ${double.tryParse(p.amount)?.toStringAsFixed(2) ?? '0.00'} FCFA'),
+              Text('Type: ${p.paymentType.name}'),
+              Text('Date: ${DateFormat.yMMMd().format(DateTime.tryParse(p.createdAt) ?? DateTime.now())}'),
               const SizedBox(height: 16),
               Row(children: [
-                if (p.status != 'canceled' && p.status != 'success')
+                if (p.status != 'cancelled' && p.status != 'success')
                   FilledButton(
                     onPressed: () async {
-                      final updated = await repo.cancel(p.id);
+                      final updated = await repo.cancel(p.id.toString());
                       if (context.mounted) context.go('/payments/${updated.id}');
                     },
                     child: const Text('Annuler'),
                   ),
                 const SizedBox(width: 12),
-                if (p.status == 'failed' || p.status == 'canceled')
+                if (p.status == 'failed' || p.status == 'cancelled')
                   OutlinedButton(
                     onPressed: () async {
-                      final updated = await repo.retry(p.id);
+                      final updated = await repo.retry(p.id.toString());
                       if (context.mounted) context.go('/payments/${updated.id}');
                     },
                     child: const Text('Réessayer'),
@@ -61,13 +61,13 @@ class PaymentDetailScreen extends ConsumerWidget {
               const SizedBox(height: 16),
               Row(children: [
                 OutlinedButton.icon(
-                  onPressed: () => _openUrl(context, repo.viewUrl(p.id)),
+                  onPressed: () => _openUrl(context, repo.viewUrl(p.id.toString())),
                   icon: const Icon(Icons.visibility),
                   label: const Text('Voir justificatif'),
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
-                  onPressed: () => _openUrl(context, repo.downloadUrl(p.id)),
+                  onPressed: () => _openUrl(context, repo.downloadUrl(p.id.toString())),
                   icon: const Icon(Icons.download),
                   label: const Text('Télécharger'),
                 ),
@@ -81,11 +81,19 @@ class PaymentDetailScreen extends ConsumerWidget {
     );
   }
 
-  void _openUrl(BuildContext context, String relativeUrl) {
-    final base = Uri.parse(const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000/api'))
-        .replace(path: '');
-    final origin = base.origin;
-    final full = '$origin$relativeUrl';
-    openUrl(full);
+  void _openUrl(BuildContext context, String relativeUrl) async {
+    const baseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000');
+    final fullUrl = '$baseUrl$relativeUrl';
+
+    final Uri uri = Uri.parse(fullUrl);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Impossible d\'ouvrir le lien')),
+        );
+      }
+    }
   }
 }

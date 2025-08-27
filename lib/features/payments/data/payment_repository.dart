@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:payments_app/core/exceptions.dart';
 import 'package:payments_app/core/http_client.dart';
 import 'package:payments_app/core/providers.dart';
-import 'package:payments_app/features/payments/data/payment_models.dart';
+import 'payment_models.dart';
 
 final paymentRepositoryProvider = Provider<PaymentRepository>((ref) {
   final client = ref.read(httpClientProvider);
@@ -18,10 +18,13 @@ class PaymentRepository {
   Future<List<Payment>> list() async {
     try {
       final res = await _http.get('/payments/');
-      final data = res.data as List<dynamic>;
-      return data
-          .map((e) => Payment.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
+
+      // CORRECTION: Accéder à data.payments au lieu de data directement
+      final responseData = res.data as Map<String, dynamic>;
+      final paymentsData = responseData['data'] as Map<String, dynamic>;
+      final payments = paymentsData['payments'] as List<dynamic>;
+
+      return payments.map((e) => Payment.fromJson(Map<String, dynamic>.from(e))).toList();
     } on DioException catch (e) {
       throw AppException(
         e.response?.data['message'] ?? 'Erreur lors de la récupération des paiements',
@@ -33,7 +36,14 @@ class PaymentRepository {
   Future<Payment> show(String id) async {
     try {
       final res = await _http.get('/payments/$id');
-      return Payment.fromJson(Map<String, dynamic>.from(res.data));
+      // CORRECTION: Si l'API retourne aussi une structure similaire pour un seul paiement
+      final responseData = res.data as Map<String, dynamic>;
+      if (responseData.containsKey('data')) {
+        return Payment.fromJson(Map<String, dynamic>.from(responseData['data']));
+      } else {
+        // Si l'API retourne directement le paiement
+        return Payment.fromJson(Map<String, dynamic>.from(res.data));
+      }
     } on DioException catch (e) {
       throw AppException(
         e.response?.data['message'] ?? 'Erreur lors de la récupération du paiement',
@@ -42,14 +52,13 @@ class PaymentRepository {
     }
   }
 
-  /// Création d'un paiement avec support Web (bytes) et Mobile (path)
   Future<Payment> create({
     required String description,
     required double amount,
     String? type,
     String? filePath,
     String? fileName,
-    Uint8List? fileBytes, // <-- pour Web
+    Uint8List? fileBytes,
   }) async {
     try {
       final form = FormData();
@@ -57,22 +66,27 @@ class PaymentRepository {
       form.fields.add(MapEntry('amount', amount.toString()));
       if (type != null) form.fields.add(MapEntry('type', type));
 
-      // Gestion fichier pour Web et Mobile
-      if (fileBytes != null) {
+      if (filePath != null) {
         form.files.add(MapEntry(
           'proof',
-          MultipartFile.fromBytes(fileBytes, filename: fileName ?? 'file.pdf'),
+          await MultipartFile.fromFile(filePath, filename: fileName ?? filePath.split('/').last),
         ));
-      } else if (filePath != null) {
+      } else if (fileBytes != null) {
         form.files.add(MapEntry(
           'proof',
-          await MultipartFile.fromFile(filePath,
-              filename: fileName ?? filePath.split('/').last),
+          MultipartFile.fromBytes(fileBytes, filename: fileName ?? 'upload_file'),
         ));
       }
 
       final res = await _http.post('/payments/', data: form);
-      return Payment.fromJson(Map<String, dynamic>.from(res.data));
+
+      // CORRECTION: Gérer la réponse selon la structure de l'API
+      final responseData = res.data as Map<String, dynamic>;
+      if (responseData.containsKey('data')) {
+        return Payment.fromJson(Map<String, dynamic>.from(responseData['data']));
+      } else {
+        return Payment.fromJson(Map<String, dynamic>.from(res.data));
+      }
     } on DioException catch (e) {
       if (e.response?.statusCode == 422) {
         final errors = e.response?.data['errors'] as Map<String, dynamic>?;
@@ -91,10 +105,37 @@ class PaymentRepository {
   Future<Payment> cancel(String id) async {
     try {
       final res = await _http.patch('/payments/$id/cancel');
-      return Payment.fromJson(Map<String, dynamic>.from(res.data));
+      final responseData = res.data as Map<String, dynamic>;
+      if (responseData.containsKey('data')) {
+        return Payment.fromJson(Map<String, dynamic>.from(responseData['data']));
+      } else {
+        return Payment.fromJson(Map<String, dynamic>.from(res.data));
+      }
     } on DioException catch (e) {
       throw AppException(
-        e.response?.data['message'] ?? 'Erreur lors de l’annulation du paiement',
+        e.response?.data['message'] ?? 'Erreur lors de l\'annulation du paiement',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  Future<void> approvePayment(int paymentId) async {
+    try {
+      await _http.patch('/payments/$paymentId/approve');
+    } on DioException catch (e) {
+      throw AppException(
+        e.response?.data['message'] ?? 'Erreur lors de l\'approbation',
+        statusCode: e.response?.statusCode,
+      );
+    }
+  }
+
+  Future<void> cancelPayment(int paymentId) async {
+    try {
+      await _http.patch('/payments/$paymentId/cancel');
+    } on DioException catch (e) {
+      throw AppException(
+        e.response?.data['message'] ?? 'Erreur lors de l\'annulation',
         statusCode: e.response?.statusCode,
       );
     }
@@ -103,12 +144,35 @@ class PaymentRepository {
   Future<Payment> retry(String id) async {
     try {
       final res = await _http.patch('/payments/$id/retry');
-      return Payment.fromJson(Map<String, dynamic>.from(res.data));
+      final responseData = res.data as Map<String, dynamic>;
+      if (responseData.containsKey('data')) {
+        return Payment.fromJson(Map<String, dynamic>.from(responseData['data']));
+      } else {
+        return Payment.fromJson(Map<String, dynamic>.from(res.data));
+      }
     } on DioException catch (e) {
       throw AppException(
-        e.response?.data['message'] ?? 'Erreur lors de la ré-essai du paiement',
+        e.response?.data['message'] ?? 'Erreur lors du re-essai du paiement',
         statusCode: e.response?.statusCode,
       );
+    }
+  }
+
+  Future<Payment> update(String id, Map<String, dynamic> data) async {
+    try {
+      final res = await _http.put('/payments/$id', data: data);
+      final responseData = res.data as Map<String, dynamic>;
+      return Payment.fromJson(responseData['data'] as Map<String, dynamic>);
+    } catch (e) {
+      throw Exception('Erreur lors de la mise à jour du paiement: $e');
+    }
+  }
+
+  Future<void> delete(String id) async {
+    try {
+      await _http.delete('/payments/$id');
+    } catch (e) {
+      throw Exception('Erreur lors de la suppression du paiement: $e');
     }
   }
 
