@@ -1,4 +1,4 @@
 const String kApiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://localhost:8000/api',
+  defaultValue: 'https://dioko-bac-laravel.onrender.com/',
 );
