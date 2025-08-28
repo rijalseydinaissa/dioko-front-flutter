@@ -73,6 +73,15 @@ class PaymentRepository {
         ));
       }
 
+      // 🔍 Debug log des champs envoyés
+      for (var f in form.fields) {
+        print('FIELD: ${f.key} = ${f.value}');
+      }
+      for (var f in form.files) {
+        print('FILE: ${f.key} = ${f.value.filename} (${f.value.length} bytes)');
+      }
+
+
       final res = await _http.post('/payments/', data: form);
 
       final responseData = res.data as Map<String, dynamic>;
